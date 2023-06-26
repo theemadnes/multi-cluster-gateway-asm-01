@@ -442,9 +442,10 @@ spec:
       port: 80
 EOF
 
-kubectl --context=${CLUSTER_1} apply -f default-httproute.yaml # only need first cluster since it's the config cluster
+kubectl --context=${CLUSTER_1} apply -f default-httproute.yaml
+kubectl --context=${CLUSTER_2} apply -f default-httproute.yaml
 
-# finally, create a virtualService to route requests to the `whereami` frontend
+# create a virtualService to route requests to the `whereami` frontend
 cat << EOF > frontend-vs.yaml
 apiVersion: networking.istio.io/v1beta1
 kind: VirtualService
@@ -466,4 +467,79 @@ EOF
 
 kubectl --context=${CLUSTER_1} apply -f frontend-vs.yaml
 kubectl --context=${CLUSTER_2} apply -f frontend-vs.yaml
+
+# finally, set up destination rules to keep requests local to the receiving region(s)
+cat << EOF > frontend-dr.yaml
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: frontend
+  namespace: frontend
+spec:
+  host: whereami-frontend.frontend.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      http:
+        maxRequestsPerConnection: 0
+    loadBalancer:
+      simple: LEAST_REQUEST
+      localityLbSetting:
+        enabled: true
+        #distribute:
+        #  - from: us-central1/*
+        #    to:
+        #      "us-central1/*": 100
+        #  - from: us-east4/*
+        #    to:
+        #      "us-east4/*": 100
+        failover:
+          - from: us-central1
+            to: us-east4
+          - from: us-east4
+            to: us-central1
+    outlierDetection:
+      consecutive5xxErrors: 1
+      interval: 1s
+      baseEjectionTime: 1m
+EOF
+
+kubectl --context=${CLUSTER_1} apply -f frontend-dr.yaml
+kubectl --context=${CLUSTER_2} apply -f frontend-dr.yaml
+
+cat << EOF > backend-dr.yaml
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: backend
+  namespace: backend
+spec:
+  host: whereami-backend.backend.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      http:
+        maxRequestsPerConnection: 0
+    loadBalancer:
+      simple: LEAST_REQUEST
+      localityLbSetting:
+        enabled: true
+        #distribute:
+        #  - from: us-central1/*
+        #    to:
+        #      "us-central1/*": 100
+        #  - from: us-east4/*
+        #    to:
+        #      "us-east4/*": 100
+        failover:
+          - from: us-central1
+            to: us-east4
+          - from: us-east4
+            to: us-central1
+    outlierDetection:
+      consecutive5xxErrors: 1
+      interval: 1s
+      baseEjectionTime: 1m
+EOF
+
+kubectl --context=${CLUSTER_1} apply -f backend-dr.yaml
+kubectl --context=${CLUSTER_2} apply -f backend-dr.yaml
 ```
