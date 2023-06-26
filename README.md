@@ -443,4 +443,27 @@ spec:
 EOF
 
 kubectl --context=${CLUSTER_1} apply -f default-httproute.yaml # only need first cluster since it's the config cluster
+
+# finally, create a virtualService to route requests to the `whereami` frontend
+cat << EOF > frontend-vs.yaml
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: whereami-vs
+  namespace: frontend
+spec:
+  gateways:
+  - ${IG_NAMESPACE}/asm-ingressgateway
+  hosts:
+  - 'frontend.endpoints.${PROJECT}.cloud.goog'
+  http:
+  - route:
+    - destination:
+        host: whereami-frontend
+        port:
+          number: 80
+EOF
+
+kubectl --context=${CLUSTER_1} apply -f frontend-vs.yaml
+kubectl --context=${CLUSTER_2} apply -f frontend-vs.yaml
 ```
