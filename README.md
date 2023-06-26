@@ -542,4 +542,7 @@ EOF
 
 kubectl --context=${CLUSTER_1} apply -f backend-dr.yaml
 kubectl --context=${CLUSTER_2} apply -f backend-dr.yaml
+
+# test the target
+curl https://frontend.endpoints.${PROJECT}.cloud.goog -s | jq "."
 ```
