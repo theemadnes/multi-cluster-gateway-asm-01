@@ -1,0 +1,13 @@
+nameSuffix: "-backend"
+namespace: backend
+commonLabels:
+  app: whereami-backend
+resources:
+- ../base
+patches:
+- path: cm-flag.yaml
+  target:
+    kind: ConfigMap
+- path: service-type.yaml
+  target:
+    kind: Service

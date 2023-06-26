@@ -30,6 +30,7 @@ gcloud services enable \
   multiclusterservicediscovery.googleapis.com \
   multiclusteringress.googleapis.com \
   trafficdirector.googleapis.com \
+  certificatemanager.googleapis.com \
   --project=${PROJECT}
 
 # enable multi-cluster services (MCS)
@@ -155,7 +156,7 @@ spec:
     - "*" # IMPORTANT: Must use wildcard here when using SSL, see note below
     #tls:
     #  mode: SIMPLE
-    #  credentialName: edge2mesh-credential
+    #  credentialName: mcg-credential
 EOF
 
 cat <<EOF > asm-ig/variant/kustomization.yaml 
@@ -176,4 +177,270 @@ EOF
 # apply IG specs
 kubectl --context ${CLUSTER_1} apply -k asm-ig/variant
 kubectl --context ${CLUSTER_2} apply -k asm-ig/variant
+
+# now set up the public IP, DNS, and certificate
+gcloud --project=${PROJECT} compute addresses create mcg-ingress-ip --global
+
+export MCG_INGRESS_IP=$(gcloud --project=${PROJECT} compute addresses describe mcg-ingress-ip --global --format "value(address)")
+echo ${MCG_INGRESS_IP}
+
+cat <<EOF > dns-spec.yaml
+swagger: "2.0"
+info:
+  description: "Cloud Endpoints DNS"
+  title: "Cloud Endpoints DNS"
+  version: "1.0.0"
+paths: {}
+host: "frontend.endpoints.${PROJECT}.cloud.goog"
+x-google-endpoints:
+- name: "frontend.endpoints.${PROJECT}.cloud.goog"
+  target: "${MCG_INGRESS_IP}"
+EOF
+
+gcloud --project=${PROJECT} endpoints services deploy dns-spec.yaml
+
+#create certificate 
+gcloud --project=${PROJECT} certificate-manager certificates create mcg-cert \
+    --domains="frontend.endpoints.${PROJECT}.cloud.goog"
+
+# create certificate map 
+gcloud --project=${PROJECT} certificate-manager maps create mcg-cert-map
+
+# create certificate map entry
+gcloud --project=${PROJECT} certificate-manager maps entries create mcg-cert-map-entry \
+    --map="mcg-cert-map" \
+    --certificates="mcg-cert" \
+    --hostname="frontend.endpoints.${PROJECT}.cloud.goog"
+
+# create health check for ingress gateways and cloud armor policies 
+gcloud compute security-policies create edge-fw-policy \
+    --project=${PROJECT} --description "Block XSS attacks"
+
+gcloud compute security-policies rules create 1000 \
+    --security-policy edge-fw-policy \
+    --expression "evaluatePreconfiguredExpr('xss-stable')" \
+    --action "deny-403" \
+    --project=${PROJECT} \
+    --description "XSS attack filtering" 
+
+cat <<EOF > cloud-armor-backendpolicy.yaml
+apiVersion: networking.gke.io/v1
+kind: GCPBackendPolicy
+metadata:
+  name: cloud-armor-backendpolicy
+  namespace: ${IG_NAMESPACE}
+spec:
+  default:
+    securityPolicy: edge-fw-policy
+  targetRef:
+    group: ""
+    kind: Service
+    name: asm-ingressgateway
+EOF
+
+# apply backend policy
+kubectl --context=${CLUSTER_1} apply -f cloud-armor-backendpolicy.yaml
+kubectl --context=${CLUSTER_2} apply -f cloud-armor-backendpolicy.yaml
+
+cat <<EOF > ingress-gateway-healthcheck.yaml
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: ingress-gateway-healthcheck
+  namespace: ${IG_NAMESPACE}
+spec:
+  default:
+    checkIntervalSec: 20
+    timeoutSec: 5
+    #healthyThreshold: HEALTHY_THRESHOLD
+    #unhealthyThreshold: UNHEALTHY_THRESHOLD
+    logConfig:
+      enabled: True
+    config:
+      type: HTTP
+      httpHealthCheck:
+        #portSpecification: USE_NAMED_PORT
+        port: 15021
+        portName: status-port
+        #host: HOST
+        requestPath: /healthz/ready
+        #response: RESPONSE
+        #proxyHeader: PROXY_HEADER
+    #requestPath: /healthz/ready
+    #port: 15021
+  targetRef:
+    group: ""
+    kind: Service
+    name: asm-ingressgateway
+EOF
+
+# apply the healthcheck
+kubectl --context=${CLUSTER_1} apply -f ingress-gateway-healthcheck.yaml
+kubectl --context=${CLUSTER_2} apply -f ingress-gateway-healthcheck.yaml
+
+# set up demo `whereami` app across both clusters
+# get app namespaces created
+kubectl --context=${CLUSTER_1} create ns frontend
+kubectl --context=${CLUSTER_1} label namespace frontend istio-injection=enabled
+kubectl --context=${CLUSTER_1} create ns backend
+kubectl --context=${CLUSTER_1} label namespace backend istio-injection=enabled
+kubectl --context=${CLUSTER_2} create ns frontend
+kubectl --context=${CLUSTER_2} label namespace frontend istio-injection=enabled
+kubectl --context=${CLUSTER_2} create ns backend
+kubectl --context=${CLUSTER_2} label namespace backend istio-injection=enabled
+
+mkdir whereami-backend
+mkdir whereami-backend/base
+
+cat <<EOF > whereami-backend/base/kustomization.yaml 
+resources:
+  - github.com/GoogleCloudPlatform/kubernetes-engine-samples/whereami/k8s
+EOF
+
+mkdir whereami-backend/variant
+
+cat <<EOF > whereami-backend/variant/cm-flag.yaml 
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: whereami
+data:
+  BACKEND_ENABLED: "False" # assuming you don't want a chain of backend calls
+  METADATA:        "backend"
+EOF
+
+cat <<EOF > whereami-backend/variant/service-type.yaml 
+apiVersion: "v1"
+kind: "Service"
+metadata:
+  name: "whereami"
+spec:
+  type: ClusterIP
+EOF
+
+cat <<EOF > whereami-backend/variant/kustomization.yaml 
+nameSuffix: "-backend"
+namespace: backend
+commonLabels:
+  app: whereami-backend
+resources:
+- ../base
+patches:
+- path: cm-flag.yaml
+  target:
+    kind: ConfigMap
+- path: service-type.yaml
+  target:
+    kind: Service
+EOF
+
+kubectl --context=${CLUSTER_1} apply -k whereami-backend/variant
+kubectl --context=${CLUSTER_2} apply -k whereami-backend/variant
+
+mkdir whereami-frontend
+mkdir whereami-frontend/base
+
+cat <<EOF > whereami-frontend/base/kustomization.yaml 
+resources:
+  - github.com/GoogleCloudPlatform/kubernetes-engine-samples/whereami/k8s
+EOF
+
+mkdir whereami-frontend/variant
+
+cat <<EOF > whereami-frontend/variant/cm-flag.yaml 
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: whereami
+data:
+  BACKEND_ENABLED: "True" # assuming you don't want a chain of backend calls
+  BACKEND_SERVICE:        "http://whereami-backend.backend.svc.cluster.local"
+EOF
+
+cat <<EOF > whereami-frontend/variant/service-type.yaml 
+apiVersion: "v1"
+kind: "Service"
+metadata:
+  name: "whereami"
+spec:
+  type: ClusterIP
+EOF
+
+cat <<EOF > whereami-frontend/variant/kustomization.yaml 
+nameSuffix: "-frontend"
+namespace: frontend
+commonLabels:
+  app: whereami-frontend
+resources:
+- ../base
+patches:
+- path: cm-flag.yaml
+  target:
+    kind: ConfigMap
+- path: service-type.yaml
+  target:
+    kind: Service
+EOF
+
+kubectl --context=${CLUSTER_1} apply -k whereami-frontend/variant
+kubectl --context=${CLUSTER_2} apply -k whereami-frontend/variant
+
+# create service exports for the ingress gateways in each cluster
+cat <<EOF > svc_export.yaml 
+kind: ServiceExport
+apiVersion: net.gke.io/v1
+metadata:
+  name: asm-ingressgateway
+  namespace: ${IG_NAMESPACE}
+EOF
+
+kubectl --context=${CLUSTER_1} apply -f svc_export.yaml
+kubectl --context=${CLUSTER_1} apply -f svc_export.yaml
+
+# set up actual frontend load balancing
+cat <<EOF > frontend-gateway.yaml 
+kind: Gateway
+apiVersion: gateway.networking.k8s.io/v1beta1
+metadata:
+  name: external-http
+  namespace: ${IG_NAMESPACE}
+  annotations:
+    networking.gke.io/certmap: mcg-cert-map
+spec:
+  gatewayClassName: gke-l7-global-external-managed-mc
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    allowedRoutes:
+      kinds:
+      - kind: HTTPRoute
+  addresses:
+  - type: NamedAddress
+    value: mcg-ingress-ip
+EOF
+
+kubectl --context=${CLUSTER_1} apply -f frontend-gateway.yaml # only need first cluster since it's the config cluster
+
+cat << EOF > default-httproute.yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: default-httproute
+  namespace: ${IG_NAMESPACE}
+spec:
+  parentRefs:
+  - name: external-http
+    namespace: ${IG_NAMESPACE}
+    sectionName: https
+  rules:
+  - matches:
+    - path:
+        value: /
+    backendRefs:
+    - name: asm-ingressgateway
+      port: 80
+EOF
+
+kubectl --context=${CLUSTER_1} apply -f default-httproute.yaml # only need first cluster since it's the config cluster
 ```
