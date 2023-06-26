@@ -21,8 +21,6 @@ export REGION_1=us-central1
 export REGION_2=us-east4
 export CLUSTER_1=autopilot-cluster-us-central1 # designated as config cluster
 export CLUSTER_2=autopilot-cluster-us-east4
-export CLUSTER_VERSION=1.26 # replace with your version
-export RELEASE_CHANNEL=REGULAR # replace with your release channel
 export PUBLIC_ENDPOINT=frontend.endpoints.${PROJECT}.cloud.goog
 
 # enable APIs 
@@ -77,4 +75,105 @@ gcloud container clusters update ${CLUSTER_1} --region=${REGION_1}\
 gcloud container clusters update ${CLUSTER_2} --region=${REGION_2}\
   --gateway-api=standard \
   --project ${PROJECT}
+
+# set up ingress gateways across both clusters
+kubectl --context ${CLUSTER_1} create namespace ${IG_NAMESPACE}
+kubectl --context ${CLUSTER_1} label namespace ${IG_NAMESPACE} istio-injection=enabled
+kubectl --context ${CLUSTER_2} create namespace ${IG_NAMESPACE}
+kubectl --context ${CLUSTER_2} label namespace ${IG_NAMESPACE} istio-injection=enabled
+
+mkdir -p asm-ig/base
+
+cat <<EOF > asm-ig/base/kustomization.yaml
+resources:
+  - github.com/GoogleCloudPlatform/anthos-service-mesh-samples/docs/ingress-gateway-asm-manifests/base
+EOF
+
+mkdir asm-ig/variant
+
+cat <<EOF > asm-ig/variant/role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: asm-ingressgateway
+  namespace: ${IG_NAMESPACE}
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "watch", "list"]
+EOF
+
+cat <<EOF > asm-ig/variant/rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: asm-ingressgateway
+  namespace: ${IG_NAMESPACE}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: asm-ingressgateway
+subjects:
+  - kind: ServiceAccount
+    name: asm-ingressgateway
+EOF
+
+cat <<EOF > asm-ig/variant/service-proto-type.yaml 
+apiVersion: v1
+kind: Service
+metadata:
+  name: asm-ingressgateway
+spec:
+  ports:
+  - name: status-port
+    port: 15021
+    protocol: TCP
+    targetPort: 15021
+  - name: http
+    port: 80
+    targetPort: 8080
+    appProtocol: HTTP
+  - name: https
+    port: 443
+    targetPort: 8443
+    appProtocol: HTTP2
+  type: ClusterIP
+EOF
+
+cat <<EOF > asm-ig/variant/gateway.yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: asm-ingressgateway
+spec:
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*" # IMPORTANT: Must use wildcard here when using SSL, see note below
+    #tls:
+    #  mode: SIMPLE
+    #  credentialName: edge2mesh-credential
+EOF
+
+cat <<EOF > asm-ig/variant/kustomization.yaml 
+namespace: ${IG_NAMESPACE}
+resources:
+- ../base
+- role.yaml
+- rolebinding.yaml
+patches:
+- path: service-proto-type.yaml
+  target:
+    kind: Service
+- path: gateway.yaml
+  target:
+    kind: Gateway
+EOF
+
+# apply IG specs
+kubectl --context ${CLUSTER_1} apply -k asm-ig/variant
+kubectl --context ${CLUSTER_2} apply -k asm-ig/variant
 ```
