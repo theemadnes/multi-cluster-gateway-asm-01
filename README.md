@@ -13,6 +13,9 @@ some notes to review before proceeding:
 ```
 # envvars
 export PROJECT=gateway-multicluster-01 # replace with your own project
+export PROJECT_NUMBER=$(gcloud projects list \
+--filter="${PROJECT}" \
+--format="value(PROJECT_NUMBER)")
 export IG_NAMESPACE=asm-ingress
 export REGION_1=us-central1
 export REGION_2=us-east4
@@ -22,6 +25,25 @@ export CLUSTER_VERSION=1.26 # replace with your version
 export RELEASE_CHANNEL=REGULAR # replace with your release channel
 export PUBLIC_ENDPOINT=frontend.endpoints.${PROJECT}.cloud.goog
 
+# enable APIs 
+gcloud services enable \
+  container.googleapis.com \
+  gkehub.googleapis.com \
+  multiclusterservicediscovery.googleapis.com \
+  multiclusteringress.googleapis.com \
+  trafficdirector.googleapis.com \
+  --project=${PROJECT}
+
+# enable multi-cluster services (MCS)
+gcloud container fleet multi-cluster-services enable \
+    --project ${PROJECT}
+
+# grant MCS IAM permissions to the project
+gcloud projects add-iam-policy-binding ${PROJECT} \
+    --member "serviceAccount:${PROJECT}.svc.id.goog[gke-mcs/gke-mcs-importer]" \
+    --role "roles/compute.networkViewer" \
+    --project=${PROJECT}
+
 # add clusters to kubeconfig
 gcloud container clusters get-credentials ${CLUSTER_1} --region ${REGION_1} --project ${PROJECT}
 gcloud container clusters get-credentials ${CLUSTER_2} --region ${REGION_2} --project ${PROJECT}
@@ -30,6 +52,29 @@ gcloud container clusters get-credentials ${CLUSTER_2} --region ${REGION_2} --pr
 kubectl config rename-context gke_${PROJECT}_${REGION_1}_${CLUSTER_1} ${CLUSTER_1}
 kubectl config rename-context gke_${PROJECT}_${REGION_2}_${CLUSTER_2} ${CLUSTER_2}
 
-# just in case the `gatewayclass`es aren't enabled, force install them on both clusters
+# designate CLUSTER_1 as the config cluster
+gcloud container fleet ingress enable \
+    --config-membership=${CLUSTER_1} \
+    --project=${PROJECT}
 
+# verify Gateway Controller is enabled for the fleet
+gcloud container fleet ingress describe --project=${PROJECT}
+
+# grant IAM permissions for the Gateway Controller
+gcloud projects add-iam-policy-binding ${PROJECT} \
+    --member "serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-multiclusteringress.iam.gserviceaccount.com" \
+    --role "roles/container.admin" \
+    --project=${PROJECT}
+
+# verify that your clusters have the `gatewayclass`es enabled
+kubectl get gatewayclass --context=$CLUSTER_1
+kubectl get gatewayclass --context=$CLUSTER_2
+
+# just in case the `gatewayclass`es aren't enabled, force install them on both clusters
+gcloud container clusters update ${CLUSTER_1} --region=${REGION_1}\
+  --gateway-api=standard \
+  --project ${PROJECT}
+gcloud container clusters update ${CLUSTER_2} --region=${REGION_2}\
+  --gateway-api=standard \
+  --project ${PROJECT}
 ```
