@@ -6,6 +6,7 @@ some notes to review before proceeding:
 - as of this writing (late June 2023), multi-cluster gateway classes don't yet support TLS to the backend, so the connection between the Google load balancer and the ASM ingress gateways will be HTTP, not HTTP(S) or HTTP/2 using TLS. Fear not, because the connection is already encrypted at the network layer, *but* for those that want to control the keys used for encryption, TLS support is coming soon
 - this demo uses a VPC named `default`
 - review the `envvars` section below and create 2x GKE autopilot clusters using the names provided (`autopilot-cluster-us-central1` and `autopilot-cluster-us-east4`) in the correct regions, and make sure to enable Anthos Service Mesh on both clusters when creating them 
+- because we're doing multi-cluster, make sure endpoint discovery is enabled on your clusters and the FW rules within your VPC permit things to work correctly. check [this](https://cloud.google.com/service-mesh/docs/unified-install/gke-install-multi-cluster#create_firewall_rule) doc.
 - make sure your clusters are using GKE version 1.26 or later to enable the Gateway API. If you've created them and they aren't of the required minimum version, perform a cluster upgrade to bring them both up to what we need for this walkthrough
 
 ### instructions
