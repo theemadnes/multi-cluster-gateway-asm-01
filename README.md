@@ -179,6 +179,18 @@ EOF
 kubectl --context ${CLUSTER_1} apply -k asm-ig/variant
 kubectl --context ${CLUSTER_2} apply -k asm-ig/variant
 
+# create service exports for the ingress gateways in each cluster
+cat <<EOF > svc_export.yaml 
+kind: ServiceExport
+apiVersion: net.gke.io/v1
+metadata:
+  name: asm-ingressgateway
+  namespace: ${IG_NAMESPACE}
+EOF
+
+kubectl --context=${CLUSTER_1} apply -f svc_export.yaml
+kubectl --context=${CLUSTER_2} apply -f svc_export.yaml
+
 # now set up the public IP, DNS, and certificate
 gcloud --project=${PROJECT} compute addresses create mcg-ingress-ip --global
 
@@ -373,18 +385,6 @@ EOF
 
 kubectl --context=${CLUSTER_1} apply -k whereami-frontend/variant
 kubectl --context=${CLUSTER_2} apply -k whereami-frontend/variant
-
-# create service exports for the ingress gateways in each cluster
-cat <<EOF > svc_export.yaml 
-kind: ServiceExport
-apiVersion: net.gke.io/v1
-metadata:
-  name: asm-ingressgateway
-  namespace: ${IG_NAMESPACE}
-EOF
-
-kubectl --context=${CLUSTER_1} apply -f svc_export.yaml
-kubectl --context=${CLUSTER_1} apply -f svc_export.yaml
 
 # set up actual frontend load balancing
 cat <<EOF > frontend-gateway.yaml 
