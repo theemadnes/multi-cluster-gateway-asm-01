@@ -233,8 +233,8 @@ spec:
   default:
     securityPolicy: edge-fw-policy
   targetRef:
-    group: ""
-    kind: Service
+    group: net.gke.io
+    kind: ServiceImport
     name: asm-ingressgateway
 EOF
 
@@ -250,27 +250,15 @@ metadata:
   namespace: ${IG_NAMESPACE}
 spec:
   default:
-    checkIntervalSec: 20
-    timeoutSec: 5
-    #healthyThreshold: HEALTHY_THRESHOLD
-    #unhealthyThreshold: UNHEALTHY_THRESHOLD
-    logConfig:
-      enabled: True
     config:
-      type: HTTP
       httpHealthCheck:
-        #portSpecification: USE_NAMED_PORT
         port: 15021
-        portName: status-port
-        #host: HOST
+        portSpecification: USE_FIXED_PORT
         requestPath: /healthz/ready
-        #response: RESPONSE
-        #proxyHeader: PROXY_HEADER
-    #requestPath: /healthz/ready
-    #port: 15021
+      type: HTTP
   targetRef:
-    group: ""
-    kind: Service
+    group: net.gke.io
+    kind: ServiceImport
     name: asm-ingressgateway
 EOF
 
@@ -434,11 +422,10 @@ spec:
     namespace: ${IG_NAMESPACE}
     sectionName: https
   rules:
-  - matches:
-    - path:
-        value: /
-    backendRefs:
-    - name: asm-ingressgateway
+  - backendRefs:
+    - group: net.gke.io
+      kind: ServiceImport
+      name: asm-ingressgateway
       port: 80
 EOF
 

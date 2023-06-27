@@ -7,11 +7,10 @@ spec:
   parentRefs:
   - name: external-http
     namespace: asm-ingress
-    sectionName: https
+    #sectionName: https
   rules:
-  - matches:
-    - path:
-        value: /
-    backendRefs:
-    - name: asm-ingressgateway
+  - backendRefs:
+    - group: net.gke.io
+      kind: ServiceImport
+      name: asm-ingressgateway
       port: 80
