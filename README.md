@@ -354,7 +354,7 @@ kind: ConfigMap
 metadata:
   name: whereami
 data:
-  BACKEND_ENABLED: "True" # assuming you don't want a chain of backend calls
+  BACKEND_ENABLED: "True"
   BACKEND_SERVICE:        "http://whereami-backend.backend.svc.cluster.local"
 EOF
 
