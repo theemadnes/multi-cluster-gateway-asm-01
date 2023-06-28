@@ -473,18 +473,11 @@ spec:
       simple: LEAST_REQUEST
       localityLbSetting:
         enabled: true
-        #distribute:
-        #  - from: us-central1/*
-        #    to:
-        #      "us-central1/*": 100
-        #  - from: us-east4/*
-        #    to:
-        #      "us-east4/*": 100
         failover:
-          - from: us-central1
-            to: us-east4
-          - from: us-east4
-            to: us-central1
+          - from: ${REGION_1}
+            to: ${REGION_2}
+          - from: ${REGION_2}
+            to: ${REGION_1}
     outlierDetection:
       consecutive5xxErrors: 1
       interval: 1s
@@ -510,18 +503,11 @@ spec:
       simple: LEAST_REQUEST
       localityLbSetting:
         enabled: true
-        #distribute:
-        #  - from: us-central1/*
-        #    to:
-        #      "us-central1/*": 100
-        #  - from: us-east4/*
-        #    to:
-        #      "us-east4/*": 100
         failover:
-          - from: us-central1
-            to: us-east4
-          - from: us-east4
-            to: us-central1
+          - from: ${REGION_1}
+            to: ${REGION_2}
+          - from: ${REGION_2}
+            to: ${REGION_1}
     outlierDetection:
       consecutive5xxErrors: 1
       interval: 1s
