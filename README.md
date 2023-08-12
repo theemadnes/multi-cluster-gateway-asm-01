@@ -95,6 +95,20 @@ kubectl --context ${CLUSTER_1} label namespace ${IG_NAMESPACE} istio-injection=e
 kubectl --context ${CLUSTER_2} create namespace ${IG_NAMESPACE}
 kubectl --context ${CLUSTER_2} label namespace ${IG_NAMESPACE} istio-injection=enabled
 
+# create self-signed cert for TLS termination between GFE and ingress gateways
+openssl req -new -newkey rsa:4096 -days 365 -nodes -x509 \
+ -subj "/CN=frontend.endpoints.${PROJECT}.cloud.goog/O=Edge2Mesh Inc" \
+ -keyout frontend.endpoints.${PROJECT}.cloud.goog.key \
+ -out frontend.endpoints.${PROJECT}.cloud.goog.crt
+
+kubectl --context ${CLUSTER_1} -n asm-ingress create secret tls edge2mesh-credential \
+ --key=frontend.endpoints.${PROJECT}.cloud.goog.key \
+ --cert=frontend.endpoints.${PROJECT}.cloud.goog.crt
+
+kubectl --context ${CLUSTER_2} -n asm-ingress create secret tls edge2mesh-credential \
+ --key=frontend.endpoints.${PROJECT}.cloud.goog.key \
+ --cert=frontend.endpoints.${PROJECT}.cloud.goog.crt
+
 mkdir -p asm-ig/base
 
 cat <<EOF > asm-ig/base/kustomization.yaml
@@ -161,14 +175,14 @@ metadata:
 spec:
   servers:
   - port:
-      number: 80
-      name: http
-      protocol: HTTP
+      number: 443
+      name: https
+      protocol: HTTPS
     hosts:
     - "*" # IMPORTANT: Must use wildcard here when using SSL, see note below
-    #tls:
-    #  mode: SIMPLE
-    #  credentialName: mcg-credential
+    tls:
+      mode: SIMPLE
+      credentialName: edge2mesh-credential
 EOF
 
 cat <<EOF > asm-ig/variant/kustomization.yaml 
@@ -438,7 +452,7 @@ spec:
     - group: net.gke.io
       kind: ServiceImport
       name: asm-ingressgateway
-      port: 80
+      port: 443
 EOF
 
 kubectl --context=${CLUSTER_1} apply -f default-httproute.yaml
