@@ -73,6 +73,7 @@ gcloud --project ${PROJECT} container fleet mesh describe
 # designate CLUSTER_1 as the config cluster for load balancing
 gcloud container fleet ingress enable \
     --config-membership=${CLUSTER_1} \
+    --location=${REGION_1} \
     --project=${PROJECT}
 
 # verify Gateway Controller is enabled for the fleet
@@ -87,14 +88,6 @@ gcloud projects add-iam-policy-binding ${PROJECT} \
 # verify that your clusters have the `gatewayclass`es enabled
 kubectl get gatewayclass --context=$CLUSTER_1
 kubectl get gatewayclass --context=$CLUSTER_2
-
-# just in case the `gatewayclass`es aren't enabled, force install them on both clusters
-gcloud container clusters update ${CLUSTER_1} --region=${REGION_1}\
-  --gateway-api=standard \
-  --project ${PROJECT}
-gcloud container clusters update ${CLUSTER_2} --region=${REGION_2}\
-  --gateway-api=standard \
-  --project ${PROJECT}
 
 # set up ingress gateways across both clusters
 kubectl --context ${CLUSTER_1} create namespace ${IG_NAMESPACE}
