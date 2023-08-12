@@ -44,15 +44,33 @@ gcloud projects add-iam-policy-binding ${PROJECT} \
     --role "roles/compute.networkViewer" \
     --project=${PROJECT}
 
-# add clusters to kubeconfig
-gcloud container clusters get-credentials ${CLUSTER_1} --region ${REGION_1} --project ${PROJECT}
-gcloud container clusters get-credentials ${CLUSTER_2} --region ${REGION_2} --project ${PROJECT}
+# create clusters
+gcloud container --project ${PROJECT} clusters create-auto ${CLUSTER_1} --region ${REGION_1} --release-channel rapid
+gcloud container --project ${PROJECT} clusters create-auto ${CLUSTER_2} --region ${REGION_2} --release-channel rapid
 
 # rename kubeconfig entries to make them a bit easier to reference
 kubectl config rename-context gke_${PROJECT}_${REGION_1}_${CLUSTER_1} ${CLUSTER_1}
 kubectl config rename-context gke_${PROJECT}_${REGION_2}_${CLUSTER_2} ${CLUSTER_2}
 
-# designate CLUSTER_1 as the config cluster
+# enable mesh on the fleet
+gcloud --project ${PROJECT} container fleet mesh enable
+
+# register clusters to the fleet
+gcloud --project ${PROJECT} container fleet memberships register ${CLUSTER_1} --gke-cluster ${REGION_1}/${CLUSTER_1}
+gcloud --project ${PROJECT} container fleet memberships register ${CLUSTER_2} --gke-cluster ${REGION_2}/${CLUSTER_2}
+
+# apply `mesh_id` label to the clusters
+gcloud container clusters update ${CLUSTER_1} --project ${PROJECT} --region ${REGION_1} --update-labels mesh_id=proj-${PROJECT_NUMBER}
+gcloud container clusters update ${CLUSTER_2} --project ${PROJECT} --region ${REGION_2} --update-labels mesh_id=proj-${PROJECT_NUMBER}
+
+# enable service mesh managed control plane and managed data plane
+gcloud --project ${PROJECT} container fleet mesh update --management automatic --memberships ${CLUSTER_1}
+gcloud --project ${PROJECT} container fleet mesh update --management automatic --memberships ${CLUSTER_2}
+
+# wait a few minutes and verify that the mesh control plane statuses are `ACTIVE`
+gcloud --project ${PROJECT} container fleet mesh describe
+
+# designate CLUSTER_1 as the config cluster for load balancing
 gcloud container fleet ingress enable \
     --config-membership=${CLUSTER_1} \
     --project=${PROJECT}
