@@ -147,6 +147,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: asm-ingressgateway
+  namespace: ${IG_NAMESPACE}
 spec:
   ports:
   - name: status-port
@@ -169,6 +170,7 @@ apiVersion: networking.istio.io/v1alpha3
 kind: Gateway
 metadata:
   name: asm-ingressgateway
+  namespace: ${IG_NAMESPACE}
 spec:
   servers:
   - port:
