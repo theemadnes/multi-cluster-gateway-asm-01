@@ -319,7 +319,7 @@ mkdir whereami-backend/base
 
 cat <<EOF > whereami-backend/base/kustomization.yaml 
 resources:
-  - github.com/GoogleCloudPlatform/kubernetes-engine-samples/whereami/k8s
+  - github.com/GoogleCloudPlatform/kubernetes-engine-samples/quickstarts/whereami/k8s
 EOF
 
 mkdir whereami-backend/variant
@@ -367,7 +367,7 @@ mkdir whereami-frontend/base
 
 cat <<EOF > whereami-frontend/base/kustomization.yaml 
 resources:
-  - github.com/GoogleCloudPlatform/kubernetes-engine-samples/whereami/k8s
+  - github.com/GoogleCloudPlatform/kubernetes-engine-samples/quickstarts/whereami/k8s
 EOF
 
 mkdir whereami-frontend/variant
